@@ -1,16 +1,16 @@
 /*****************************************************************************
-                °æÈ¨ËùÓĞ(C)£¬2007-2022£¬º¼Öİ»ªÈıÍ¨ĞÅ¼¼ÊõÓĞÏŞ¹«Ë¾
+                ç‰ˆæƒæ‰€æœ‰(C)ï¼Œ2007-2022ï¼Œæ­å·åä¸‰é€šä¿¡æŠ€æœ¯æœ‰é™å…¬å¸
 ------------------------------------------------------------------------------
                             pipe.c
-  ²ú Æ· Ãû: VERSION
-  Ä£ ¿é Ãû:
-  Éú³ÉÈÕÆÚ: 2022Äê3ÔÂ22ÈÕ
-  ×÷    Õß: x22827
-  ÎÄ¼şÃèÊö: usb binder driver
+  äº§ å“ å: VERSION
+  æ¨¡ å— å:
+  ç”Ÿæˆæ—¥æœŸ: 2022å¹´3æœˆ22æ—¥
+  ä½œ    è€…: x22827
+  æ–‡ä»¶æè¿°: usb binder driver
 
 ------------------------------------------------------------------------------
-   ĞŞ¸ÄÀúÊ·
-   ÈÕÆÚ        ĞÕÃû             ÃèÊö
+   ä¿®æ”¹å†å²
+   æ—¥æœŸ        å§“å             æè¿°
   --------------------------------------------------------------------------
 
 *****************************************************************************/
@@ -27,6 +27,7 @@ extern "C"{
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/semaphore.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
@@ -51,6 +52,7 @@ STATIC INT g_iPipeInitFist = 1;
 USHORT g_usPktSeq = 0;
 
 extern INT g_iPktHeadLen;
+DEFINE_SEMAPHORE(g_stSendDataSem);
 
 PIPE_QUEUE_T *Pipe_find(INT iPipeId)
 {
@@ -178,7 +180,7 @@ INT IsUsbDetected(VOID)
     return g_iPipeInit;
 }
 
-/*·ÂÕÕusbcore HandTxHandler ·¢ËÍ²ßÂÔ*/
+/*ä»¿ç…§usbcore HandTxHandler å‘é€ç­–ç•¥*/
 VOID PipeTxHandler (VOID)
 {
     UINT uiLen = 0;
@@ -317,7 +319,7 @@ VOID PipeRxHandler (UCHAR *pucBuffer, UINT uiCount, INT iStatus)
 
     if (pstRecvQue->bAbnormal)
     {
-        /* µ±Ç°´¦ÓÚÒì³£Ê±£¬²»´¦ÀíÊı¾İ */
+        /* å½“å‰å¤„äºå¼‚å¸¸æ—¶ï¼Œä¸å¤„ç†æ•°æ® */
         printk("WARNING: PipeRxhandler(). in abnormal status\n");
         spin_unlock(&pstRecvQue->stLock);
         return;
@@ -325,7 +327,7 @@ VOID PipeRxHandler (UCHAR *pucBuffer, UINT uiCount, INT iStatus)
     else if (0 != iStatus)
     {
         pstRecvQue->bAbnormal = BOOL_TRUE;
-        pstRecvQue->uiEntrySize[iWriteIndex] = MAX_PIPE_DATA_SIZE;    /* ´óĞ¡Îª×î´óÖµÊ±±íÊ¾³ö´í */
+        pstRecvQue->uiEntrySize[iWriteIndex] = MAX_PIPE_DATA_SIZE;    /* å¤§å°ä¸ºæœ€å¤§å€¼æ—¶è¡¨ç¤ºå‡ºé”™ */
         pstRecvQue->iCount++;
         wake_up_interruptible(&pstRecvQue->stWait);
         spin_unlock(&pstRecvQue->stLock);
@@ -431,9 +433,83 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
 {
     INT   iRet = BINDER_SUCCESS;
     LONG lTime = 0;
-
+    unsigned long start_jiffies = 0;
+    unsigned long actual_wait_jiffies = 0;
+    
     lTime = msecs_to_jiffies(uiTimeout);
     //DEBUG_PRINT("time 0x%x timeout 0x%x \n",time,timeout);
+
+    if (0 == lTime)
+    {
+        iRet = down_timeout(&g_stSendDataSem, MAX_SCHEDULE_TIMEOUT); /* æ— é™ç­‰å¾…(æ­»ç­‰) */
+		if (-ETIME == iRet)
+		{
+			/* è¶…æ—¶å¤„ç† */
+			if (pucBuff)
+			{
+				kfree(pucBuff);
+				pucBuff = NULL;
+			}
+			printk("SendPipeDataToSlave Semaphore Max timed out.\n");
+			return BINDER_PIPE_WAIT_EVENT_TIMEOUT;
+		}
+	    else if (0 != iRet)
+	    {
+			/* ä¸­æ–­å¤„ç†æˆ–å…¶ä»–é”™è¯¯ */
+	        if (pucBuff)
+            {
+                kfree(pucBuff);
+                pucBuff = NULL;
+            }
+            printk("SendPipeDataToSlave Semaphore Max interrupted.\n");
+            return BINDER_PIPE_WAIT_EVENT_TERMINATED;
+	   }
+    }
+    else
+	{
+        start_jiffies = jiffies; /* è®°å½•å¼€å§‹æ—¶é—´(jiffieså•ä½) */
+	    iRet = down_timeout(&g_stSendDataSem, lTime); /* è¶…æ—¶ç­‰å¾… */
+        if (-ETIME == iRet)
+		{
+			/* è¶…æ—¶å¤„ç† */
+            if (pucBuff)
+            {
+                kfree(pucBuff);
+                pucBuff = NULL;
+            }
+            printk("SendPipeDataToSlave Semaphore timed out\n");
+            return BINDER_PIPE_WAIT_EVENT_TIMEOUT;
+        }
+		else if (0 != iRet)
+		{
+			/* ä¸­æ–­å¤„ç†æˆ–å…¶ä»–é”™è¯¯ */
+	        if (pucBuff)
+            {
+                kfree(pucBuff);
+                pucBuff = NULL;
+            }
+            printk("SendPipeDataToSlave Semaphore interrupted.\n");
+            return BINDER_PIPE_WAIT_EVENT_TERMINATED;
+	    }
+        /* è®¡ç®—å®é™…ç­‰å¾…çš„jiffiesæ—¶é—´ */
+	    actual_wait_jiffies = jiffies - start_jiffies;
+	    /* è°ƒæ•´å‰©ä½™æ—¶é—´ */
+        lTime = lTime - actual_wait_jiffies;
+	    /* lTime - actual_wait_jiffiesç†è®ºä¸Šæ’å¤§äº0,å½“down_timeout(&g_stSendDataSem, lTime)æ‰§è¡ŒæˆåŠŸè¯´æ˜æœªè¶…æ—¶,å½“æ‰§è¡Œå¤±è´¥åˆ™è¯´æ˜è¶…æ—¶å·²è¿”å› */
+		if (0 >= lTime)
+		{
+			/* å‰©ä½™lTimeçš„è´Ÿå€¼æ ¡éªŒ */
+			if (pucBuff)
+            {
+                kfree(pucBuff);
+                pucBuff = NULL;
+            }
+			printk("SendPipeDataToSlave Semaphore timeout err.\n");
+			up(&g_stSendDataSem);
+            return BINDER_PIPE_WAIT_EVENT_TIMEOUT;
+		}
+    }
+
     if (!g_iSendDataFlag)
     {
         DEBUG_PRINT("INFO: SendPipeDataToSlave(): waiting Transmitting Data.\n");
@@ -447,6 +523,7 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
                     kfree(pucBuff);
                     pucBuff = NULL;
                 }
+				up(&g_stSendDataSem);
                 return BINDER_PIPE_WAIT_EVENT_TERMINATED;
             }
         }
@@ -461,6 +538,7 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
                     kfree(pucBuff);
                     pucBuff = NULL;
                 }
+				up(&g_stSendDataSem);
                 return BINDER_PIPE_WAIT_EVENT_TERMINATED;
             }
             if (iRet == 0)
@@ -470,6 +548,7 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
                     kfree(pucBuff);
                     pucBuff = NULL;
                 }
+				up(&g_stSendDataSem);
                 printk("SendPipeDataToSlave timeout.\n");
                 return BINDER_PIPE_WAIT_EVENT_TIMEOUT;
             }
@@ -478,12 +557,13 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
         DEBUG_PRINT("INFO: SendPipeDataToSlave(): wake up Transmitting Data.\n");
     }
 
+    g_iSendDataComplete = 0;
+    g_iSendDataFlag = 0;
+    up(&g_stSendDataSem);
     g_pucTxDataBuf = pucBuff;
     g_uiTxDataLen = uiLen;
     g_uiTxDataPos = 0;
 
-    g_iSendDataComplete = 0;
-    g_iSendDataFlag = 0;
     PipeTxHandler();
 
     return iRet;
@@ -494,7 +574,7 @@ ssize_t PipeWriteByKernel(USHORT usId, const CHAR *pcBuf, size_t ulCount, UINT u
     CHAR *pcLocalBuffer = NULL;
     INT iBuflen = 0;
 
-    /* ¶àÉêÇëÒ»¶ÎÄÚ´æ, ÓÃÓÚ´æ·Å°üÍ·ĞÅÏ¢ºÍ·¢ËÍ¿ÕÊı¾İ°ü */
+    /* å¤šç”³è¯·ä¸€æ®µå†…å­˜, ç”¨äºå­˜æ”¾åŒ…å¤´ä¿¡æ¯å’Œå‘é€ç©ºæ•°æ®åŒ… */
     iBuflen = ((ulCount / MAX_ENDPOINT_SIZE) + 1) * MAX_ENDPOINT_SIZE;
     iBuflen += g_iPktHeadLen;
     pcLocalBuffer= (CHAR *)kmalloc(iBuflen, GFP_ATOMIC);
@@ -502,14 +582,14 @@ ssize_t PipeWriteByKernel(USHORT usId, const CHAR *pcBuf, size_t ulCount, UINT u
     {
         return -ENOMEM;
     }
-    /* ×Ô¶¨ÒåÊı¾İÍ·½á¹¹:
+    /* è‡ªå®šä¹‰æ•°æ®å¤´ç»“æ„:
      * -------------------------------------------------
      * |   BYTE0   |   BYTE1   |   BYTE2   |   BYTE3   |
      * -------------------------------------------------
      * |      session id       |       pkt len         |
      * -------------------------------------------------
      */
-    /* ´Ë´¦½öÌî³äID£¬ÔÚPipeTxHandlerÖĞÌî³äÊµ¼Êpktlen*/
+    /* æ­¤å¤„ä»…å¡«å……IDï¼Œåœ¨PipeTxHandlerä¸­å¡«å……å®é™…pktlen*/
     pcLocalBuffer[0] = usId & 0xFF;
     pcLocalBuffer[1] = (usId >> 8) & 0xFF;
 
@@ -546,7 +626,7 @@ ssize_t PipeRead(USHORT usId, CHAR *pcBuf, size_t ulCount, UINT uiTimeout)
     iLen = RecvPipeDataFromSlave(pstPipeQue, pcLocalBuffer, uiTimeout);
     if (iLen < 0)
     {
-        msleep(300);  /* µÈ´ı±¾´ÎÊı¾İ·¢Íê£¬ÔÙÇå³ı¹ÜµÀÊı¾İ£¬·ÀÖ¹Êı¾İ²ĞÁô */
+        msleep(300);  /* ç­‰å¾…æœ¬æ¬¡æ•°æ®å‘å®Œï¼Œå†æ¸…é™¤ç®¡é“æ•°æ®ï¼Œé˜²æ­¢æ•°æ®æ®‹ç•™ */
         (VOID)ClearPipeDataQueue(pstPipeQue);
         kfree(pcLocalBuffer);
         return -EFAULT;
@@ -569,7 +649,7 @@ ssize_t PipeWrite(USHORT usId, const CHAR __user *pcBuf, size_t ulCount, UINT ui
     CHAR *pcLocalBuffer = NULL;
     INT iBuflen = 0;
 
-    /* ¶àÉêÇëÒ»¶ÎÄÚ´æ, ÓÃÓÚ´æ·Å°üÍ·ĞÅÏ¢ºÍ·¢ËÍ¿ÕÊı¾İ°ü */
+    /* å¤šç”³è¯·ä¸€æ®µå†…å­˜, ç”¨äºå­˜æ”¾åŒ…å¤´ä¿¡æ¯å’Œå‘é€ç©ºæ•°æ®åŒ… */
     iBuflen = ((ulCount / MAX_ENDPOINT_SIZE) + 1) * MAX_ENDPOINT_SIZE;
     iBuflen += g_iPktHeadLen;
     pcLocalBuffer = (CHAR *)kmalloc(iBuflen, GFP_ATOMIC);
@@ -577,14 +657,14 @@ ssize_t PipeWrite(USHORT usId, const CHAR __user *pcBuf, size_t ulCount, UINT ui
     {
         return -ENOMEM;
     }
-    /* ×Ô¶¨ÒåÊı¾İÍ·½á¹¹:
+    /* è‡ªå®šä¹‰æ•°æ®å¤´ç»“æ„:
      * -------------------------------------------------
      * |   BYTE0   |   BYTE1   |   BYTE2   |   BYTE3   |
      * -------------------------------------------------
      * |      session id       |       pkt len         |
      * -------------------------------------------------
      */
-    /* ´Ë´¦½öÌî³äID£¬ÔÚPipeTxHandlerÖĞÌî³äÊµ¼Êpktlen*/
+    /* æ­¤å¤„ä»…å¡«å……IDï¼Œåœ¨PipeTxHandlerä¸­å¡«å……å®é™…pktlen*/
     pcLocalBuffer[0] = usId & 0xFF;
     pcLocalBuffer[1] = (usId >> 8) & 0xFF;
 
