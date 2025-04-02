@@ -1,16 +1,16 @@
 /*****************************************************************************
-                °æÈ¨ËùÓĞ(C)£¬2007-2022£¬º¼Öİ»ªÈıÍ¨ĞÅ¼¼ÊõÓĞÏŞ¹«Ë¾
+                ç‰ˆæƒæ‰€æœ‰(C)ï¼Œ2007-2022ï¼Œæ­å·åä¸‰é€šä¿¡æŠ€æœ¯æœ‰é™å…¬å¸
 ------------------------------------------------------------------------------
                             binder_mod.c
-  ²ú Æ· Ãû: VERSION
-  Ä£ ¿é Ãû:
-  Éú³ÉÈÕÆÚ: 2022Äê3ÔÂ22ÈÕ
-  ×÷    Õß: x22827
-  ÎÄ¼şÃèÊö: usb binder driver
+  äº§ å“ å: VERSION
+  æ¨¡ å— å:
+  ç”Ÿæˆæ—¥æœŸ: 2022å¹´3æœˆ22æ—¥
+  ä½œ    è€…: x22827
+  æ–‡ä»¶æè¿°: usb binder driver
 
 ------------------------------------------------------------------------------
-   ĞŞ¸ÄÀúÊ·
-   ÈÕÆÚ        ĞÕÃû             ÃèÊö
+   ä¿®æ”¹å†å²
+   æ—¥æœŸ        å§“å             æè¿°
   --------------------------------------------------------------------------
 
 *****************************************************************************/
@@ -503,8 +503,8 @@ STATIC INT binder_ioctl(struct inode *pstInode, struct file *pstFile, UINT uiCmd
         {
             (VOID)ClearPipeDataQueue(pstBinder->pstRecvQue);
             g_iPktHeadLen = USB_BINDER_PKT_HEAD_LEN;
-            acHead[0] = pstBinder->usSessionID & 0xff;          /* µÍ8Î» */
-            acHead[1] = (pstBinder->usSessionID >> 8) & 0xff;   /* ¸ß8Î» */
+            acHead[0] = pstBinder->usSessionID & 0xff;          /* ä½8ä½ */
+            acHead[1] = (pstBinder->usSessionID >> 8) & 0xff;   /* é«˜8ä½ */
             acHead[2] = USB_BINDER_CTRL_CMD_CONNETCT;
             stPkt.pcData = acHead;
             stPkt.uiDataLen = g_iPktHeadLen;
@@ -639,19 +639,19 @@ STATIC INT binder_send_osinfo(VOID)
 
     memcpy(&stSysname, utsname(), sizeof(stSysname));
 
-    /* ¶àÉêÇëÒ»¸ö°üÍ· */
+    /* å¤šç”³è¯·ä¸€ä¸ªåŒ…å¤´ */
     pcBuf = (CHAR *)kmalloc(sizeof(stSysname) + USB_BINDER_PKT_HEAD_LEN, GFP_ATOMIC);
     if (NULL == pcBuf)
     {
         printk(KERN_ERR "binder: no memory enough.\n");
         return -ENOMEM;
     }
-    /* ¹¹Ôì°üÍ· */
+    /* æ„é€ åŒ…å¤´ */
     pcBuf[0] = ID_LOW_BITS(0);
     pcBuf[1] = ID_HIGH_BITS(0);
     pcBuf[2] = CMD_LOW_BITS(USB_BINDER_CTRL_CMD_SEND_OSINFO);
     pcBuf[3] = CMD_HIGH_BITS(USB_BINDER_CTRL_CMD_SEND_OSINFO);
-    /* Êı¾İ¸úÔÚ°üÍ·ºóÃæ */
+    /* æ•°æ®è·Ÿåœ¨åŒ…å¤´åé¢ */
     memcpy(&pcBuf[USB_BINDER_PKT_HEAD_LEN], &stSysname, sizeof(stSysname));
 
     stPkt.pcData = pcBuf;
@@ -750,7 +750,7 @@ STATIC INT __init binder_init(VOID)
 {
     INT iRetval;
 
-    printk("USB Device Host Driver(Version : 1.00.02) \n");
+    printk("USB Device Host Driver(Version : 1.00.03) \n");
 
     memset(&g_stBinder, 0, sizeof(BINDER_MOD_S));
 
