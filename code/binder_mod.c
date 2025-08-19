@@ -462,7 +462,52 @@ STATIC VOID usb_binder_disconnect(struct usb_interface *pstUsbIntf)
 
     flush_workqueue(g_pstQueue);
     printk("usb_binder_disconnect.\n");
-    return;
+    if (g_stBinder.pstUrbOut)
+    {
+        usb_kill_urb(g_stBinder.pstUrbOut);
+        usb_free_urb(g_stBinder.pstUrbOut);
+        g_stBinder.pstUrbOut = NULL;
+    }
+
+    if (g_stBinder.pstUrbIn)
+    {
+        usb_kill_urb(g_stBinder.pstUrbIn);
+        usb_free_urb(g_stBinder.pstUrbIn);
+        g_stBinder.pstUrbIn = NULL;
+    }
+
+#if LINUX_VERSION_CODE>= KERNEL_VERSION(2,6,36)
+    /*......codes under version newer than 2.6.36......*/
+    if (g_stBinder.pcUsbBufVirtOut)
+    {
+        usb_free_coherent(g_pstUsbDev, g_stBinder.uiUsbBufLen, g_stBinder.pcUsbBufVirtOut,
+                          g_stBinder.ulUsbBufOutPhysAddr);
+        g_stBinder.pcUsbBufVirtOut = NULL;
+    }
+    if (g_stBinder.pcUsbBufVirtIn)
+    {
+        usb_free_coherent(g_pstUsbDev, g_stBinder.uiUsbBufLen, g_stBinder.pcUsbBufVirtIn,
+                          g_stBinder.ulUsbBufInPhysAddr);
+        g_stBinder.pcUsbBufVirtIn = NULL;
+    }
+
+#else
+     /*......codes under version older than 2.6.36......*/
+    if (g_stBinder.pcUsbBufVirtOut)
+    {
+        usb_buffer_free(g_pstUsbDev, g_stBinder.uiUsbBufLen, g_stBinder.pcUsbBufVirtOut,
+                        g_stBinder.ulUsbBufOutPhysAddr);
+        g_stBinder.pcUsbBufVirtOut = NULL;
+    }
+    if (g_stBinder.pcUsbBufVirtIn)
+    {
+        usb_buffer_free(g_pstUsbDev, g_stBinder.uiUsbBufLen, g_stBinder.pcUsbBufVirtIn,
+                        g_stBinder.ulUsbBufInPhysAddr);
+        g_stBinder.pcUsbBufVirtIn = NULL;
+    }
+#endif
+    usb_set_intfdata(pstUsbIntf, NULL);
+    return ;
 }
 
 
@@ -750,7 +795,7 @@ STATIC INT __init binder_init(VOID)
 {
     INT iRetval;
 
-    printk("USB Device Host Driver(Version : 1.00.03) \n");
+    printk("USB Device Host Driver(Version : 1.00.04) \n");
 
     memset(&g_stBinder, 0, sizeof(BINDER_MOD_S));
 
@@ -789,14 +834,19 @@ error:
 
 STATIC VOID __exit binder_exit(VOID)
 {
+	/* 1. 删除字符设备（cdev）*/
     cdev_del(&g_stBinderCdev);
-    flush_workqueue(g_pstQueue);
+	/* 2. 注销USB驱动（确保所有设备已断开）*/
     usb_deregister(&usb_binder_driver);
+	//free_usb_resource();
+	/* 3. 释放设备号 */
     unregister_chrdev_region(g_ulDevId,1);
+	/* 4. 销毁设备节点（/dev/xxx） */
     device_destroy(g_pstBinderClass,g_ulDevId);
+	/* 7. 销毁设备类*/
     class_destroy(g_pstBinderClass);
+	/* 3. 停止工作队列并禁止新任务提交 */
     destroy_workqueue(g_pstQueue);
-    free_usb_resource();
     return ;
 }
 
