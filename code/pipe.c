@@ -19,7 +19,7 @@
 extern "C"{
 #endif /* __cplusplus */
 
-
+#include <linux/semaphore.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
@@ -27,7 +27,7 @@ extern "C"{
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/semaphore.h>
+//#include <linux/semaphore.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
@@ -52,7 +52,10 @@ STATIC INT g_iPipeInitFist = 1;
 USHORT g_usPktSeq = 0;
 
 extern INT g_iPktHeadLen;
-DEFINE_SEMAPHORE(g_stSendDataSem);
+//DEFINE_SEMAPHORE(g_stSendDataSem);
+//static DECLARE_MUTEX(g_stSendDataSem);
+struct semaphore g_stSendDataSem;
+//sema_init(g_stSendDataSem, 1);
 
 PIPE_QUEUE_T *Pipe_find(INT iPipeId)
 {
@@ -435,7 +438,7 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
     LONG lTime = 0;
     unsigned long start_jiffies = 0;
     unsigned long actual_wait_jiffies = 0;
-    
+    sema_init(&g_stSendDataSem, 1);
     lTime = msecs_to_jiffies(uiTimeout);
     //DEBUG_PRINT("time 0x%x timeout 0x%x \n",time,timeout);
 
@@ -563,9 +566,7 @@ STATIC INT SendPipeDataToSlave(UCHAR *pucBuff, UINT uiLen, UINT uiTimeout)
     g_pucTxDataBuf = pucBuff;
     g_uiTxDataLen = uiLen;
     g_uiTxDataPos = 0;
-
     PipeTxHandler();
-
     return iRet;
 }
 

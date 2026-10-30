@@ -761,7 +761,13 @@ STATIC INT binder_dev_init(VOID)
         goto cdev_add_error;
     }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 26)
+    // 旧版本内核：需要 THIS_MODULE
     g_pstBinderClass = class_create(THIS_MODULE, DEVICE_NAME);
+#else
+    // 新版本内核：不需要 THIS_MODULE
+    g_pstBinderClass = class_create(DEVICE_NAME);
+#endif
     if (IS_ERR(g_pstBinderClass))
     {
         iRetval = PTR_ERR(g_pstBinderClass);
